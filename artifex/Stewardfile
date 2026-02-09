@@ -1,0 +1,40 @@
+# Copyright (c) 2026 Mihai Stancu (https://github.com/curatorium)
+
+claude() {
+	apt libncurses5
+
+	defer <<-'SH'
+		npm install -g @anthropic-ai/claude-code
+	SH
+}
+
+github() {
+	key github https://cli.github.com/packages/githubcli-archive-keyring.gpg
+	src github https://cli.github.com/packages stable main
+	apt gh
+	apt git
+}
+
+utils() {
+	apt bash-completion
+	apt dnsutils
+	apt fzf
+	apt inetutils-ping
+	apt iproute2
+	apt ipset
+	apt iptables
+	apt jq
+	apt less
+	apt man-db
+	apt nano
+	apt netcat-traditional
+	apt net-tools
+	apt procps
+	apt readline-common
+	apt ripgrep
+	apt socat
+	apt sudo
+	apt telnet
+	apt unzip
+	apt whois
+}

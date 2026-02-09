@@ -1,0 +1,40 @@
+# Save this into a docker-compose.yml (or add the service to an existing one)
+# Build the image:  docker compose -f {{maximusDir}}/docker-compose.yml build artifex
+# Start:            docker compose up -d artifex-{{name}}
+
+services:
+  artifex-{{name}}:
+    image: ghcr.io/curatorium/maximus-artifex
+    restart: always
+    environment:
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: 0
+{{#if anthropicApiKey}}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+{{/if}}
+{{#if claudeOauthToken}}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
+{{/if}}
+{{#if ghToken}}
+      GH_TOKEN: ${GH_TOKEN}
+{{/if}}
+    volumes:
+      - artifex-{{name}}-sessions:/home/artifex/.claude # sessions
+      - $HOME/.maximus/tasks/discord/{{channel.id}}:/tasks:rw # #{{channel.name}}
+{{#if credentials}}
+      - $HOME/.claude/.credentials.json:/home/artifex/.claude/.credentials.json:ro # auth
+{{/if}}
+{{#if ghCredentials}}
+      - $HOME/.config/gh:/home/artifex/.config/gh:ro # github
+{{/if}}
+{{#if ssh}}
+      - $HOME/.maximus/ssh:/home/artifex/.ssh:ro # ssh
+{{/if}}
+{{#if codebase}}
+      - {{codebase}}:/app # codebase
+{{/if}}
+{{#each mounts}}
+      - {{this}}
+{{/each}}
+
+volumes:
+  artifex-{{name}}-sessions: ~

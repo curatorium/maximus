@@ -1,0 +1,65 @@
+#!/bin/bash
+# Copyright (c) 2026 Mihai Stancu (https://github.com/curatorium)
+
+function main() {
+	set -Eeuo pipefail;
+
+	mkdir -p /tasks/inbox /tasks/working /tasks/outbox /tasks/done;
+
+	while true; do
+		# Find oldest task -- process FIFO
+		local task; task=$(find /tasks -path '*/inbox/*.md' -type f | sort | head -n 1);
+
+		# No tasks -- waiting
+		[[ -z "$task" ]] && sleep 5 && continue;
+
+		task "$task";
+	done
+}
+
+function task() {
+	local started=$SECONDS;
+	local task="${1:-}";
+
+	local base; base="$(dirname "$(dirname "$task")")";
+	mkdir -p "$base/working" "$base/outbox" "$base/done";
+	touch "$base/session";
+
+	local name; name="$(basename "$task")";
+
+	# Claim task -- avoids conflicts
+	mv "$task" "$base/working/";
+	echo ">>> Working on $name"
+
+	local tmp; tmp="$(mktemp)";
+	# shellcheck disable=2064
+	trap "rm -f $tmp" EXIT;
+
+	local session; session="$(cat "$base/session")";
+	local claude_args=(
+		${session:+--resume $session}
+		--print
+		--output-format json
+		--dangerously-skip-permissions
+		--append-system-prompt "${ARTIFEX_PROMPT:-}"
+	);
+	# Run Claude Code with task in STDIN
+	if ! claude "${claude_args[@]}" < "$base/working/$name" > "$tmp" 2>&1; then
+		echo "!!! Failed $name after $((SECONDS - started))s";
+		echo "Error: $(head -5 "$tmp")" > "$base/outbox/$name";
+		mv "$base/working/$name" "$base/done/";
+		return;
+	fi
+
+	# Save session
+	jq -r '.session_id' "$tmp" > "$base/session";
+	# Send response -- empty result means Claude completed via tool calls only
+	local result; result="$(jq -r '.result' "$tmp")";
+	echo "${result:-Done!}" > "$base/outbox/$name";
+
+	# Mark task as done
+	mv "$base/working/$name" "$base/done/"; # save historical task
+	echo "<<< Finished $name in $((SECONDS - started))s";
+}
+
+main "$@";

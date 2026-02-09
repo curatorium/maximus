@@ -1,0 +1,7 @@
+# Copyright (c) 2026 Mihai Stancu (https://github.com/curatorium)
+
+utils() {
+	apt curl
+	apt jq
+	apt nano
+}

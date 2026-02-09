@@ -1,0 +1,15 @@
+services:
+  artifex:
+    image: ghcr.io/curatorium/maximus-artifex
+    environment:
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: 0
+    deploy: {replicas: 0}
+    restart: always
+
+  scribe:
+    image: ghcr.io/curatorium/maximus-scribe
+    env_file: [ .env ]
+    environment: {MAXIMUS_DIR: $PWD}
+    restart: unless-stopped
+    volumes:
+      - ~/.maximus/tasks:/tasks:rw
