@@ -2,4 +2,5 @@ docker-compose.override.yml
 .idea/
 node_modules/
 .env
+sudoers-*
 *.log

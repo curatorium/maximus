@@ -1,0 +1,43 @@
+#!/usr/bin/bash
+# Copyright (c) 2026 Mihai Stancu (https://github.com/curatorium)
+
+#
+# Bash completions for maximus
+# Completes maximus subcommands, docker compose fallthrough commands, and channel names.
+#
+
+maximus:completions() {
+  local subcommands="install env mounts sudoers add start attach help";
+  local compose_subs="up down ps logs pull push restart stop start build exec run config";
+  local channel_subs="env mounts sudoers add start attach";
+
+  local cur="${COMP_WORDS[COMP_CWORD]}";
+  local cmd="${COMP_WORDS[1]:-}";
+
+  if [[ $COMP_CWORD -eq 1 ]]; then
+    COMPREPLY=($(compgen -W "$subcommands $compose_subs" -- "$cur"));
+    return;
+  fi
+
+  if [[ $COMP_CWORD -ge 2 && " $channel_subs " == *" $cmd "* ]]; then
+    maximus:completions::channels "$cur";
+  elif [[ $COMP_CWORD -ge 2 && " $subcommands " != *" $cmd "* ]]; then
+    maximus:completions::services "$cur";
+  fi
+}
+
+maximus:completions::channels() {
+  local cur="$1";
+  local channels;
+  channels=$(basename -a -s .conf "$HOME"/.maximus/*.conf 2>/dev/null);
+  COMPREPLY=($(compgen -W "$channels" -- "$cur"));
+}
+
+maximus:completions::services() {
+  local cur="$1";
+  local services;
+  services=$(docker compose -f "$HOME/.maximus/docker-compose.yml" config --services 2>/dev/null);
+  COMPREPLY=($(compgen -W "$services" -- "$cur"));
+}
+
+complete -F maximus:completions maximus;

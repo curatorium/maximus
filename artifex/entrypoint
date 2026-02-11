@@ -1,8 +1,22 @@
 #!/bin/bash
 # Copyright (c) 2026 Mihai Stancu (https://github.com/curatorium)
 
-function main() {
+# @name artifex
+# @type command
+#
+# @desc The entrypoint for Artifex containers handling task execution.
+# @desc Takes tasks from /tasks/inbox/*.md (chanels) or /tasks/*/inbox/*.md (threads).
+function artifex:main() {
+	# Do nothing if sourced
+	[[ "${BASH_SOURCE[0]}" != "$0" ]] && return;
+
 	set -Eeuo pipefail;
+
+	# Handle subcommands like `artifex attach`.
+	local cmd="${1:-}"; shift || true;
+	if [[ -n "$cmd" ]]; then
+		"artifex:$cmd" "$@";
+	fi
 
 	mkdir -p /tasks/inbox /tasks/working /tasks/outbox /tasks/done;
 
@@ -11,55 +25,147 @@ function main() {
 		local task; task=$(find /tasks -path '*/inbox/*.md' -type f | sort | head -n 1);
 
 		# No tasks -- waiting
-		[[ -z "$task" ]] && sleep 5 && continue;
+		[[ -z "$task" ]] && sleep 0.1s && continue;
 
-		task "$task";
+		artifex::task "$task";
 	done
 }
 
-function task() {
+# @name artifex attach
+# @type subcommand
+#
+# @desc Allows Artifex users to attach & continue a claude conversation session.
+function artifex:attach() {
+	stty susp undef 2>/dev/null;
+	claude --continue --dangerously-skip-permissions "$@";
+}
+
+# @name artifex::task
+# @type internal
+#
+# @desc Task flow inbox/$task -> working/$task -> done/$task
+# @desc                          outbox/$reply -> sent/$reply
+function artifex::task() {
 	local started=$SECONDS;
 	local task="${1:-}";
 
 	local base; base="$(dirname "$(dirname "$task")")";
 	mkdir -p "$base/working" "$base/outbox" "$base/done";
-	touch "$base/session";
 
 	local name; name="$(basename "$task")";
 
 	# Claim task -- avoids conflicts
 	mv "$task" "$base/working/";
-	echo ">>> Working on $name"
+	echo ">>> Working on $name";
 
 	local tmp; tmp="$(mktemp)";
 	# shellcheck disable=2064
 	trap "rm -f $tmp" EXIT;
 
-	local session; session="$(cat "$base/session")";
-	local claude_args=(
-		${session:+--resume $session}
+	local rc=0; artifex::retry 2 artifex::run "$base/working/$name" "$tmp" || rc=$?;
+
+	# Send response -- extract .result from JSON, or forward raw error text
+	local result; result="$(jq -Rsr 'try (fromjson | .result // empty) catch .' "$tmp")";
+	echo "${result:-Done!}" > "$base/outbox/$name";
+
+	(( rc == 0 )) &&
+		echo "<<< Finished $name in $((SECONDS - started))s" ||
+		echo "!!! Failed $name after $((SECONDS - started))s (rc=$rc)";
+
+	mv "$base/working/$name" "$base/done/";
+}
+
+# @name artifex::retry
+# @type internal
+function artifex::retry() {
+	local attempts=$1; shift;
+	for ((attempt = 1; attempt <= attempts; attempt++)); do
+		local rc=0; "$@" || rc=$?;
+		case $rc in
+			0)  return 0;;   # Success
+			75) ;;           # Retryable -- continue
+			*)  return $rc;; # Fatal -- stop without retry
+		esac
+	done
+	return 75;
+}
+
+# @name artifex::run
+# @type internal
+function artifex::run() {
+	local input="$1"; shift;
+	local out="$1";   shift;
+
+	local prompt='
+		You are running inside a Docker container, receiving tasks asynchronously via Discord.
+
+		# Environment
+		- /app.git — writable bare git repo of your assigned project.
+		- /app — writable working directory (create worktrees from /app.git here).
+
+		# Communication
+		Your exchange is asynchronous — mediated by a Discord bot. Each round-trip is a separate task. You CAN ask clarifying questions but batch them — be specific about what you need to proceed.
+		The user cannot see your tool calls, file reads, or intermediate output. Your final text response is the ONLY thing relayed. Be concrete: what you found, what you changed (file paths, summaries), what you could not do and why.
+
+		# Formatting (Discord)
+		Messages are chunked at 2000 chars, splitting on \n---\n.
+		- Use \n---\n between logical sections for clean chunk boundaries.
+		- No markdown tables — use fenced code blocks with aligned columns instead.
+		- No HTML tags.
+	';
+	ARTIFEX_PROMPT="${ARTIFEX_PROMPT:-$prompt}";
+
+	local nudge="After completing this task, write a summary of what you did and what you found.";
+	ARTIFEX_NUDGE="${ARTIFEX_NUDGE:-$nudge}";
+
+	local continue="";
+	[[ -f ~/.claude/projects/-app/sessions-index.json ]] && continue="--continue";
+
+	local args=(
+		${continue:+$continue}
 		--print
 		--output-format json
 		--dangerously-skip-permissions
-		--append-system-prompt "${ARTIFEX_PROMPT:-}"
+		--append-system-prompt "$ARTIFEX_PROMPT"
 	);
-	# Run Claude Code with task in STDIN
-	if ! claude "${claude_args[@]}" < "$base/working/$name" > "$tmp" 2>&1; then
-		echo "!!! Failed $name after $((SECONDS - started))s";
-		echo "Error: $(head -5 "$tmp")" > "$base/outbox/$name";
-		mv "$base/working/$name" "$base/done/";
-		return;
+
+	# Run Claude Code with task in STDIN, prefixed with result instruction
+	local rc=0;
+	{ echo "$ARTIFEX_NUDGE"; echo; cat "$input"; } |
+		claude "${args[@]}" > "$out" 2>&1 ||
+		rc=$?;
+
+	# Auth token expired -- fatal
+	if (( rc != 0 )) && grep -qi "auth\|unauthorized\|401\|api.key\|invalid.*key" "$out"; then
+		return 2; # No retry
 	fi
 
-	# Save session
-	jq -r '.session_id' "$tmp" > "$base/session";
-	# Send response -- empty result means Claude completed via tool calls only
-	local result; result="$(jq -r '.result' "$tmp")";
-	echo "${result:-Done!}" > "$base/outbox/$name";
+	# No previous session (first run) -- retry without --continue
+	if (( rc != 0 )) && grep -qi "session.*not.found\|no.*conversation" "$out"; then
+		return 75;
+	fi
 
-	# Mark task as done
-	mv "$base/working/$name" "$base/done/"; # save historical task
-	echo "<<< Finished $name in $((SECONDS - started))s";
+	# Unknown error
+	if (( rc != 0 )); then
+		sleep 5s;
+		return 1;
+	fi
+
+	artifex::compact < "$out";
+
+	return 0;
 }
 
-main "$@";
+# @name compact
+# @type internal
+#
+# @desc Automatically compacts when getting to 75% to context window size.
+function artifex::compact() {
+	local tokens; tokens="$(jq -r '[.usage.input_tokens, .usage.cache_creation_input_tokens, .usage.cache_read_input_tokens] | map(. // 0) | add')";
+	(( tokens <= 150000 )) && return 0;
+
+	echo "~~~ Context at ${tokens} tokens (>75%), compacting...";
+	echo "/compact" | claude --continue --print --output-format json --dangerously-skip-permissions > /dev/null 2>&1 || true;
+}
+
+artifex:main "$@";

@@ -2,17 +2,24 @@
 
 claude() {
 	apt libncurses5
-
-	defer <<-'SH'
-		npm install -g @anthropic-ai/claude-code
-	SH
+	ext https://claude.ai/install.sh
+	defer <<<"cp /root/.local/bin/claude /usr/local/bin/claude"
 }
 
 github() {
-	key github https://cli.github.com/packages/githubcli-archive-keyring.gpg
-	src github https://cli.github.com/packages stable main
 	apt gh
 	apt git
+	key github https://cli.github.com/packages/githubcli-archive-keyring.gpg
+	src github https://cli.github.com/packages stable main
+	apt openssh-client
+}
+
+docker() {
+	key docker https://download.docker.com/linux/ubuntu/gpg
+	src docker https://download.docker.com/linux/debian $VERSION_CODENAME stable
+	apt docker-ce-cli
+	apt docker-compose-plugin
+	apt docker-buildx-plugin
 }
 
 utils() {

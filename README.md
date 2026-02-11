@@ -1,15 +1,17 @@
 # Maximus
 
-Talk to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through Discord. Each channel gets its own persistent Claude session that can read, write, and operate on your codebase — all running in isolated Docker containers.
+Talk to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through Discord. Each channel gets its own persistent Claude session that can read, write, and operate on your codebase — all running in isolated Docker containers you control.
 
 ## Quick Start
 
 ```bash
-mkdir maximus && cd maximus
-curl -fLO https://github.com/curatorium/maximus/releases/latest/download/docker-compose.yml
-curl -fLO https://github.com/curatorium/maximus/releases/latest/download/.env.sample
-cp .env.sample .env        # fill in DISCORD_BOT_TOKEN + auth credentials
-docker compose up -d
+# Install the CLI
+sudo curl -fL https://github.com/curatorium/maximus/releases/latest/download/maximus -o /usr/local/bin/maximus
+sudo chmod +x /usr/local/bin/maximus
+
+# Add an Artifex instance — run from inside your project directory
+cd ~/Projects/my-project
+maximus start my-channel
 ```
 
 ## Creating the Discord Bot
@@ -23,34 +25,73 @@ docker compose up -d
      - **Server Members Intent** (optional)
 
 3. Navigate to **OAuth2** in the left sidebar:
-   - Under **Scopes**, select `bot` and `applications.commands`
+   - Under **Scopes**, select `bot`
    - Under **Bot Permissions**, select:
      - Send Messages
      - Send Messages in Threads
      - Read Message History
-     - Use Slash Commands
    - Copy the generated URL and open it in your browser to invite the bot to your server
 
-4. Paste the bot token into your `.env` file:
-   ```env
-   DISCORD_BOT_TOKEN=your-token-here
-   ```
+4. Run `maximus install` and paste the token when prompted.
+
+## CLI Reference
+
+```
+maximus install              Set up the Scribe (Discord bot) service
+maximus add     <channel>    Create a new Artifex config for a Discord channel
+maximus start   [channel]    Start all services or a specific channel
+maximus env     [channel]    Edit shared .env or instance-specific <channel>.env (restarts)
+maximus mounts  [channel]    Edit shared or instance volume mounts (restarts)
+maximus sudoers <channel>    Edit sudoers for an instance via visudo (restarts)
+maximus attach  <channel>    Exec into the container and resume the last Claude session
+
+maximus up      [channel]    Create and start container(s)
+maximus ps      [channel]    Show running container(s)
+maximus logs    [channel]    Show container log(s) (-f to follow)
+maximus down    [channel]    Stop and remove container(s)
+```
+
+Any command not listed above is passed through to `docker compose`.
+
+### Adding an Artifex Instance
+
+Run `maximus add <channel>` from inside your project directory. The channel name maps to a Discord channel:
+
+```bash
+cd ~/Projects/my-project
+maximus add my-channel
+```
+
+The project's `.git` directory is mounted as `/app.git`. Artifex creates worktrees from it inside `/app` — this isolates the container's working directory from yours.
+
+### Environment Variables and Mounts
+
+Use `maximus env` and `maximus mounts` to configure instances. Without a channel name, edits the shared config (applies to all instances). With a channel name, edits instance-specific config. Both restart services after saving.
+
+```bash
+maximus env                 # shared env vars
+maximus env my-channel      # instance-specific env vars
+maximus mounts              # shared volume mounts
+maximus mounts my-channel   # instance-specific volume mounts
+```
+
+Mounts are one per line in Docker volume format (e.g. `~/src:/app:ro`).
+
+### Privileged Access (sudoers)
+
+```bash
+maximus sudoers my-channel
+```
+
+Uses `visudo` for syntax checking. When the sudoers file exists, it's automatically mounted into the container.
 
 ## Authentication
 
-Maximus needs credentials to talk to Claude. Choose one method:
-
-| Method | Env Variable | Notes |
-|--------|-------------|-------|
-| Claude credentials file | Mount `~/.claude/.credentials.json` | Same credentials as your local Claude Code install |
-| OAuth token | `CLAUDE_CODE_OAUTH_TOKEN` | Token-based auth |
-| API key | `ANTHROPIC_API_KEY` | Direct Anthropic API access |
-
-The auth method is configured per-Artifex instance (see [Provisioning](#provisioning-artifex-instances)).
+Maximus needs credentials to talk to Claude. By default it mounts `~/.claude`. Alternatively, set `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` via `maximus env`.
 
 ## Usage
 
-Mention the bot (or use the configured trigger word) in any channel that has a corresponding Artifex instance:
+Mention the bot (or use the configured `AGENT_NAME`) in any channel that has a corresponding Artifex instance:
 
 ```
 @max review the latest PR on this repo and summarize the changes
@@ -59,94 +100,27 @@ Mention the bot (or use the configured trigger word) in any channel that has a c
 @max write tests for the user registration endpoint
 ```
 
-Each channel maintains its own Claude session — context carries over between messages. Thread messages are routed to their parent channel's Artifex instance.
-
-## Setup
-
-1. **Create the Discord bot** (see above) and configure `.env`:
-   ```env
-   AGENT_NAME=@max                  # optional — only respond when mentioned by this name
-   OWNER_ID=                        # optional — restrict to a single Discord user ID
-
-   GIT_AUTHOR_NAME=                 # git identity for commits made by Artifex
-   GIT_AUTHOR_EMAIL=
-   GH_TOKEN=                        # GitHub personal access token for gh CLI
-
-   DISCORD_BOT_TOKEN=your-token     # required
-   CLAUDE_CODE_OAUTH_TOKEN=         # choose one auth method
-   ```
-
-2. **Start** the Scribe (Discord bot):
-   ```bash
-   docker compose up -d scribe
-   ```
-
-3. **Provision Artifex instances** — one per channel/project (see below).
-
-## Provisioning Artifex Instances
-
-Each Artifex instance maps a Discord channel to a codebase on your host. Provision them via Discord or manually.
-
-### Via Discord Slash Commands
-
-Once Scribe is running, it registers two slash commands:
-
-- **`/provision`** — Generate a `docker-compose.yml` snippet for a single instance:
-  - `name` — Service name suffix (e.g. `steward`)
-  - `channel` — Discord channel for task routing
-  - `credentials` / `claude-oauth-token` / `anthropic-api-key` — Claude auth (at least one required)
-  - `gh-credentials` / `gh-token` — GitHub auth *(optional)*
-  - `ssh` — Mount SSH key *(optional)*
-  - `codebase` *(optional)* — Absolute path to the project directory to mount
-  - `mounts` *(optional)* — Comma-separated `host:container[:mode]` volume mounts
-
-- **`/provision-all`** — Generate snippets for all visible text channels at once (same auth options)
-
-Copy the generated YAML into your `docker-compose.override.yml` and run `docker compose up -d`.
-
-### Manually
-
-Create a `docker-compose.override.yml`:
-
-```yaml
-services:
-  artifex-my-project:
-    image: ghcr.io/curatorium/maximus-artifex
-    restart: always
-    environment:
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: 0
-    volumes:
-      - artifex-my-project-sessions:/home/artifex/.claude
-      - $HOME/.config/gh:/home/artifex/.config/gh:ro
-      - $HOME/.claude/.credentials.json:/home/artifex/.claude/.credentials.json:ro
-      - $HOME/.maximus/tasks/{channel-id}:/tasks:rw
-      - /path/to/your/project:/app
-
-volumes:
-  artifex-my-project-sessions: ~
-```
-
-Then: `docker compose up -d artifex-my-project`
+Each channel maintains its own Claude session — context carries over between messages.
 
 ## Architecture
 
 ```
-Discord ──► Scribe (Node.js) ──► filesystem ──► Artifex (Claude Code in Docker) ──► filesystem ──► Scribe ──► Discord
+Discord --> Scribe (Node.js) --> filesystem --> Artifex (Claude Code) --> filesystem --> Scribe --> Discord
 ```
 
-Two containers. IPC via the filesystem. No daemons, no message queues.
+One Artifex per channel (plus one global Scribe). IPC via the filesystem. No daemons, no message queues.
 
 | Component | Role |
 |-----------|------|
-| **Scribe** | Discord bot that writes incoming messages to `/tasks/{channel}/inbox/` and polls `/tasks/**/outbox/` to send responses back |
-| **Artifex** | Headless Claude Code runner (with `--dangerously-skip-permissions`) that processes tasks FIFO, maintains per-channel sessions, and writes responses to the outbox. Runs as non-root inside Docker with only the mounts and env vars you give it. |
+| **Scribe** | Discord bot that writes incoming messages to `/tasks/discord/{channel}/inbox/` and polls `/tasks/**/outbox/` to send replies back |
+| **Artifex** | Headless Claude Code runner (`--dangerously-skip-permissions`) that processes tasks FIFO, maintains per-channel sessions, and writes responses to the outbox. Runs as non-root inside Docker with only the mounts and env vars you give it. |
 
 ### Task Lifecycle
 
 ```
-inbox/{timestamp}.md  →  working/{timestamp}.md  →  done/{timestamp}.md
-                                  ↓
-                          outbox/{timestamp}.md  →  sent/{timestamp}.md
+inbox/{timestamp}.md  -->  working/{timestamp}.md  -->  done/{timestamp}.md
+                                    |
+                            outbox/{timestamp}.md  -->  sent/{timestamp}.md
 ```
 
 1. **Scribe** writes the message to `inbox/`
@@ -154,46 +128,37 @@ inbox/{timestamp}.md  →  working/{timestamp}.md  →  done/{timestamp}.md
 3. Claude's response goes to `outbox/`, the task moves to `done/`
 4. **Scribe** sends the outbox file to Discord and moves it to `sent/`
 
+### File Layout
+
+```
+~/.maximus/
+  tasks/discord/<channel>/      # Task directories (inbox, working, outbox, done, sent)
+```
+
 ## Configuration
+
+### Scribe
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DISCORD_BOT_TOKEN` | Yes | Discord bot token |
 | `AGENT_NAME` | No | Only respond when this name is mentioned (e.g. `@max`) |
 | `OWNER_ID` | No | Only accept messages from this Discord user ID |
-| `GIT_AUTHOR_NAME` | No | Git author name for commits made by Artifex |
-| `GIT_AUTHOR_EMAIL` | No | Git author email for commits made by Artifex |
-| `GH_TOKEN` | No | GitHub personal access token for `gh` CLI inside Artifex |
-| `ANTHROPIC_API_KEY` | No | Anthropic API key (one of three auth methods) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | No | Claude Code OAuth token (one of three auth methods) |
-| `ARTIFEX_PROMPT` | No | Additional system prompt appended to Claude sessions |
-| `POLL_INTERVAL` | No | Outbox polling interval in ms (default: `100`) |
 
-## Project Structure
+### Artifex (via `maximus env`)
 
-```
-maximus/
-├── artifex/
-│   ├── Dockerfile        # Claude Code container image
-│   ├── entrypoint        # Task loop: picks inbox files, runs Claude, writes outbox
-│   └── Stewardfile       # System dependencies (claude-code, gh, git, jq, etc.)
-├── scribe/
-│   ├── Dockerfile        # Discord bot container image
-│   ├── Stewardfile       # System dependencies
-│   ├── index.js          # Discord bot: listens, writes tasks, polls outbox, sends replies
-│   ├── provision.yml.hbs # Handlebars template for generating Artifex compose snippets
-│   └── package.json
-├── docker-compose.yml          # Base service definitions
-├── docker-compose.override.yml # Your local Artifex instances (gitignored)
-├── .env.sample                 # Environment variable template
-└── .env                        # Your local config (gitignored)
-```
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | No | Anthropic API key (alternative auth method) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | No | Claude Code OAuth token (alternative auth method) |
+| `ARTIFEX_PROMPT` | No | Override the default system prompt for Claude sessions |
+| `ARTIFEX_NUDGE` | No | Override the instruction prepended to each task |
 
 ## FAQ
 
 **Why Discord and not Slack/Telegram/WhatsApp?**
 
-Because I use Discord. The Scribe is ~300 lines of code — swap it for your preferred platform.
+Because I use Discord. The Scribe is ~200 lines of code — swap it for your preferred platform.
 
 **Is this secure?**
 
@@ -201,23 +166,19 @@ Claude Code runs with `--dangerously-skip-permissions` — but inside a Docker c
 
 **Why a file-based task queue instead of Redis/RabbitMQ/etc.?**
 
-Simplicity. Files are debuggable (`ls /tasks/*/inbox`), require no additional services, and survive restarts. The entire IPC mechanism is `fs.writeFileSync` and `mv`.
+Simplicity. Files are debuggable (`ls ~/.maximus/tasks/discord/*/inbox`), require no additional services, and survive restarts. The entire IPC mechanism is `fs.writeFileSync` and `mv`.
 
 **Can multiple people use the same bot?**
 
 Yes. Leave `OWNER_ID` empty and anyone in the Discord server can talk to it. Set `OWNER_ID` to restrict it to a single user.
 
-**How do I give an Artifex instance access to GitHub?**
-
-Set `GH_TOKEN` in your `.env` to a [GitHub personal access token](https://github.com/settings/tokens). This is passed to Artifex containers as an environment variable and authenticates the `gh` CLI automatically.
-
 **How do I debug a stuck task?**
 
 Check the task directories on your host:
 ```bash
-ls ~/.maximus/tasks/*/inbox/    # pending tasks
-ls ~/.maximus/tasks/*/working/  # currently processing
-ls ~/.maximus/tasks/*/outbox/   # waiting to be sent
+ls ~/.maximus/tasks/discord/*/inbox/    # pending tasks
+ls ~/.maximus/tasks/discord/*/working/  # currently processing
+ls ~/.maximus/tasks/discord/*/outbox/   # waiting to be sent
 ```
 
 ## License

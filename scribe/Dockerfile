@@ -21,4 +21,4 @@ COPY . .
 
 # Run as non-root user
 USER scribe
-CMD ["npm", "start"]
+CMD ["node", "discord.js"]

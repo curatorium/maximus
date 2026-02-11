@@ -50,13 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          cp artifex/Dockerfile Dockerfile.artifex
-          cp scribe/Dockerfile Dockerfile.scribe
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            docker-compose.yml
-            .env.sample
-            Dockerfile.artifex
-            Dockerfile.scribe
+          files: maximus

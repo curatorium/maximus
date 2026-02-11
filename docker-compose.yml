@@ -1,15 +1,21 @@
 services:
-  artifex:
-    image: ghcr.io/curatorium/maximus-artifex
-    environment:
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: 0
-    deploy: {replicas: 0}
-    restart: always
-
   scribe:
+    build: {context: scribe}
     image: ghcr.io/curatorium/maximus-scribe
+    init: true
     env_file: [ .env ]
     environment: {MAXIMUS_DIR: $PWD}
+    deploy: {resources: {limits: {cpus: '1', memory: 512m, pids: 128}}}
+    healthcheck: {test: test -f /tasks/discord/.ready, interval: 5s, timeout: 3s, retries: 12}
     restart: unless-stopped
     volumes:
       - ~/.maximus/tasks:/tasks:rw
+
+  artifex:
+    build: {context: artifex}
+    image: ghcr.io/curatorium/maximus-artifex
+    environment:
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: 0
+    deploy: {replicas: 0, resources: {limits: {cpus: '2', memory: 6g, pids: 256}}}
+    depends_on: {scribe: {condition: service_healthy}}
+    restart: always
