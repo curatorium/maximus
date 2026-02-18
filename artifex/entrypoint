@@ -16,13 +16,16 @@ function artifex:main() {
 	local cmd="${1:-}"; shift || true;
 	if [[ -n "$cmd" ]]; then
 		"artifex:$cmd" "$@";
+		return;
 	fi
 
-	mkdir -p /tasks/inbox /tasks/working /tasks/outbox /tasks/done;
+	mkdir -p /app/.claude/tasks/{inbox,working,outbox,done};
+
+	artifex::recover;
 
 	while true; do
 		# Find oldest task -- process FIFO
-		local task; task=$(find /tasks -path '*/inbox/*.md' -type f | sort | head -n 1);
+		local task; task=$(find /app/.claude/tasks -path '*/inbox/*.md' -type f | sort | head -n 1);
 
 		# No tasks -- waiting
 		[[ -z "$task" ]] && sleep 0.1s && continue;
@@ -36,8 +39,29 @@ function artifex:main() {
 #
 # @desc Allows Artifex users to attach & continue a claude conversation session.
 function artifex:attach() {
+	local continue=; [[ -f ~/.claude/projects/-app/sessions-index.json ]] && continue="--continue";
+
 	stty susp undef 2>/dev/null;
-	claude --continue --dangerously-skip-permissions "$@";
+	claude ${continue:+$continue} --dangerously-skip-permissions "$@";
+}
+
+# @name artifex::recover
+# @type internal
+#
+# @desc Recovers interrupted tasks on startup.
+# @desc Moves working/*.md back to inbox/ with a resume instruction appended.
+function artifex::recover() {
+	local task;
+	while IFS= read -r task; do
+		local base; base="$(dirname "$(dirname "$task")")";
+		local name; name="$(basename "$task")";
+
+		mkdir -p "$base/inbox";
+
+		printf '\n\n---\n\nYou were previously working on the above task but were interrupted. Review the local changes and resume work.\n' >> "$task";
+		mv "$task" "$base/inbox/";
+		echo "~~~ Recovered interrupted task: $name";
+	done < <(find /app/.claude/tasks -path '*/working/*.md' -type f 2>/dev/null)
 }
 
 # @name artifex::task
@@ -96,12 +120,15 @@ function artifex::run() {
 	local input="$1"; shift;
 	local out="$1";   shift;
 
+	local name; name="$(basename "$input")";
+
+	local taskdir; taskdir="$(dirname "$(dirname "$input")")";
+
 	local prompt='
 		You are running inside a Docker container, receiving tasks asynchronously via Discord.
 
 		# Environment
-		- /app.git — writable bare git repo of your assigned project.
-		- /app — writable working directory (create worktrees from /app.git here).
+		- /app — the project root (mounted from host).
 
 		# Communication
 		Your exchange is asynchronous — mediated by a Discord bot. Each round-trip is a separate task. You CAN ask clarifying questions but batch them — be specific about what you need to proceed.
@@ -118,21 +145,22 @@ function artifex::run() {
 	local nudge="After completing this task, write a summary of what you did and what you found.";
 	ARTIFEX_NUDGE="${ARTIFEX_NUDGE:-$nudge}";
 
-	local continue="";
-	[[ -f ~/.claude/projects/-app/sessions-index.json ]] && continue="--continue";
+	local continue=""; [[ -f ~/.claude/projects/-app/sessions-index.json ]] && continue="--continue";
 
 	local args=(
 		${continue:+$continue}
-		--print
-		--output-format json
+		--model "${ARTIFEX_MODEL:-opus}"
+		--print --verbose --output-format stream-json
 		--dangerously-skip-permissions
 		--append-system-prompt "$ARTIFEX_PROMPT"
 	);
 
 	# Run Claude Code with task in STDIN, prefixed with result instruction
+	# Stream processor writes intermediate text blocks to outbox for Scribe
 	local rc=0;
 	{ echo "$ARTIFEX_NUDGE"; echo; cat "$input"; } |
-		claude "${args[@]}" > "$out" 2>&1 ||
+		claude "${args[@]}" 2>&1 |
+		artifex::stream "$taskdir/outbox/$name" > "$out" ||
 		rc=$?;
 
 	# Auth token expired -- fatal
@@ -162,10 +190,34 @@ function artifex::run() {
 # @desc Automatically compacts when getting to 75% to context window size.
 function artifex::compact() {
 	local tokens; tokens="$(jq -r '[.usage.input_tokens, .usage.cache_creation_input_tokens, .usage.cache_read_input_tokens] | map(. // 0) | add')";
-	(( tokens <= 150000 )) && return 0;
+	(( tokens <= 750000 )) && return 0;
 
 	echo "~~~ Context at ${tokens} tokens (>75%), compacting...";
-	echo "/compact" | claude --continue --print --output-format json --dangerously-skip-permissions > /dev/null 2>&1 || true;
+	echo "/compact" | claude --continue --print --output-format json --dangerously-skip-permissions "$@" > /dev/null 2>&1 || true;
+}
+
+# @name artifex::stream
+# @type internal
+#
+# @desc Processes stream-json output: writes assistant text blocks to outbox,
+# @desc passes only the final summary line to stdout.
+function artifex::stream() {
+	local reply="$1";
+	local last="";
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue;
+		last="$line";
+
+		if ! jq -er 'select(.type == "assistant" and .message.type == "text")' <<<"$line" > /dev/null 2>&1; then
+			continue;
+		fi
+
+		local text; text=$(jq -r '.message.content' <<<"$line" 2>/dev/null);
+		[[ -n "$text" ]] && echo "$text" >> "$reply";
+	done
+
+	# Final line is the JSON summary — goes to stdout (captured in $out)
+	echo "$last";
 }
 
 artifex:main "$@";

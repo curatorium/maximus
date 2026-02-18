@@ -21,4 +21,4 @@ COPY . .
 
 # Run as non-root user
 USER scribe
-CMD ["node", "discord.js"]
+CMD ["node", "discord/index.js"]

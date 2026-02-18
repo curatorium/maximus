@@ -8,13 +8,14 @@
 # @usage maximus <command> [args...]
 #
 # @arg <command> -- Subcommand to run (install, start, add, status, attach, help).
-maximus:main() {
+function maximus:main() {
 	set -euo pipefail;
 
 	local cmd="${1:-:help}"; shift || true;
+	local project; project="$(pwd)";  # dynamic scope: used by maximus:add
 
 	# Ensure scribe is installed before any subcommand
-	maximus:install;
+	maximus::install;
 
 	cd "$HOME/.maximus" 2>/dev/null || true;
 
@@ -27,38 +28,28 @@ maximus:main() {
 
 # @name maximus install
 # @type internal
-# @desc Set up the Scribe (Discord bot) service. Prompts for a bot token, generates
-# @desc ~/.maximus/scribe.yml, and starts the container. Idempotent -- re-running
-# @desc when already installed just ensures the container is up.
+# @desc Set up the Scribe (Discord bot) service. Prompts for a bot token, stores it
+# @desc in ~/.maximus/.env, and regenerates docker-compose.yml. Idempotent.
 #
 # @usage maximus install
-maximus:install() {
-	local scribe="$HOME/.maximus/scribe.yml";
-	[[ -f "$scribe" ]] && return;
+function maximus::install() {
+	[[ -f "$HOME/.maximus/scribe.env" ]] && return;
 
 	read -rsp "Discord Bot Token: " token; echo;
 	[[ -z "$token" ]] && echo "Token is required." && return 1;
 
+	read -rp  "Agent name (e.g. @max, blank=respond to all): " agent_name;
+	read -rp  "Owner ID (Discord user ID, blank=allow all users): " owner_id;
+
 	mkdir -p ~/.maximus;
 	cat <<-ENV > "$HOME/.maximus/.env"
-		AGENT_NAME=@max
-		OWNER_ID=
+	ENV
+	cat <<-ENV > "$HOME/.maximus/scribe.env"
+		DISCORD_BOT_TOKEN=${token}
+		AGENT_NAME=${agent_name}
+		OWNER_ID=${owner_id}
 	ENV
 	touch "$HOME/.maximus/.mounts";
-
-	cat <<-YML > "$HOME/.maximus/scribe.yml"
-		services:
-		  scribe:
-		    image: ghcr.io/curatorium/maximus-scribe
-		    init: true
-		    env_file: [.env]
-		    environment:
-		      DISCORD_BOT_TOKEN: ${token}
-		    deploy: {resources: {limits: {cpus: '1', memory: 512m, pids: 128}}}
-		    restart: unless-stopped
-		    volumes:
-		      - ~/.maximus/tasks:/tasks:rw
-	YML
 
 	maximus::regen;
 }
@@ -72,7 +63,7 @@ maximus:install() {
 # @usage maximus env [channel]
 #
 # @arg [channel] -- Discord channel name (optional).
-maximus:env() {
+function maximus:env() {
 	local channel="${1:-}";
 
 	local env="$HOME/.maximus/${channel:+${channel}}.env";
@@ -80,7 +71,7 @@ maximus:env() {
 
 	${EDITOR:-vi} "$env";
 	maximus::regen;
-	docker compose up -d;
+	maximus:up;
 }
 
 # @name maximus mounts
@@ -93,7 +84,7 @@ maximus:env() {
 # @usage maximus mounts [channel]
 #
 # @arg [channel] -- Discord channel name (optional).
-maximus:mounts() {
+function maximus:mounts() {
 	local channel="${1:-}";
 	local mounts="$HOME/.maximus/${channel:+${channel}}.mounts";
 
@@ -101,7 +92,7 @@ maximus:mounts() {
 
 	${EDITOR:-vi} "$mounts";
 	maximus::regen;
-	docker compose up -d;
+	maximus:up;
 }
 
 # @name maximus sudoers
@@ -112,15 +103,15 @@ maximus:mounts() {
 # @usage maximus sudoers <channel>
 #
 # @arg <channel> -- Discord channel name.
-maximus:sudoers() {
-	local channel=${1?usage: maximus sudoers \<channel\>};
+function maximus:sudoers() {
+	local channel=${1?usage: maximus sudoers <channel>};
 	local sudoers="/etc/maximus/artifex-sudoers-${channel}";
 
 	sudo mkdir -p /etc/maximus;
 	sudo touch "$sudoers";
 	sudo visudo -f "$sudoers";
 	maximus::regen;
-	docker compose up -d;
+	maximus:up;
 }
 
 # @name maximus add
@@ -131,18 +122,17 @@ maximus:sudoers() {
 # @usage maximus add <channel>
 #
 # @arg <channel> -- Discord channel name (= instance identifier).
-maximus:add() {
-	local channel=${1?usage: maximus add \<channel\>};
-	mkdir -p "$HOME/.maximus/tasks/discord/${channel}";
+function maximus:add() {
+	local channel=${1?usage: maximus add <channel>};
 
 	touch "$HOME/.maximus/${channel}.env";
 	touch "$HOME/.maximus/${channel}.mounts";
 
-	local project; project="$(pwd)";
-	cat > "$HOME/.maximus/${channel}.conf" <<<"project=${project}";
+	cat > "$HOME/.maximus/${channel}.conf" <<<"project=${project}";  # dynamic scope: from maximus:main
 
 	local sessions; sessions="${project//\//-}";
 	mkdir -p "$HOME/.claude/projects/${sessions}";
+	mkdir -p "${project}/.claude/tasks";
 
 	maximus::regen;
 }
@@ -155,12 +145,12 @@ maximus:add() {
 # @usage maximus start [channel]
 #
 # @arg [channel] -- Discord channel name (optional).
-maximus:start() {
+function maximus:start() {
 	local channel="${1:-}";
 
 	[[ -n "$channel" && ! -f "$HOME/.maximus/${channel}.conf" ]] && maximus:add "$channel";
 
-	docker compose up -d ${channel:+"$channel"};
+	maximus:up ${channel:+"$channel"};
 }
 
 # @name maximus attach
@@ -171,16 +161,23 @@ maximus:start() {
 # @usage maximus attach <channel>
 #
 # @arg <channel> -- Discord channel name.
-maximus:attach() {
-	local channel=${1?usage: maximus attach \<channel\>};
+function maximus:attach() {
+	local channel=${1?usage: maximus attach <channel> [worktree]}; shift;
 
-	[[ ! -f "$HOME/.maximus/${channel}.conf" ]] && echo "No config: ${channel}" && return 1;
+	maximus:up > /dev/null 2>&1;
 
-	docker compose up -d;
+	local session="maximus-${channel}";
+	if ! tmux -L maximus has-session -t "$session" 2>/dev/null; then
+		tmux -L maximus new-session -s "$session" -d "docker compose exec ${channel} entrypoint attach $*";
+		tmux -L maximus set-option -t "$session" mouse on;
+		tmux -L maximus bind-key -n C-z detach-client;
+	fi
 
-	docker compose cp "$HOME/.claude.json" "${channel}:/home/artifex/.claude.json";
-
-	docker compose exec "${channel}" entrypoint attach;
+	if [[ -z "${TMUX:-}" ]]; then
+		tmux -L maximus attach-session -t "$session";
+	else
+		docker compose exec "${channel}" entrypoint attach "$@";
+	fi
 }
 
 # @name help
@@ -188,7 +185,7 @@ maximus:attach() {
 # @desc Print usage information.
 #
 # @usage maximus help
-maximus::help() {
+function maximus::help() {
 	cat <<-'EOF'
 	USAGE:
 	  maximus install              Set up the Scribe (Discord bot) service
@@ -197,7 +194,7 @@ maximus::help() {
 	  maximus env     [channel]    Edit shared .env or instance-specific <channel>.env (restarts)
 	  maximus mounts  [channel]    Edit shared or instance volume mounts (restarts)
 	  maximus sudoers <channel>    Edit sudoers for an instance via visudo (restarts)
-	  maximus attach  <channel>    Exec into the container and resume the last Claude session
+	  maximus attach  <channel>    Exec into the container and resume a Claude session
 
 	  # Aliases for docker compose (in maximus context):
 	  maximus up      [channel]    Create and start container(s)
@@ -207,21 +204,48 @@ maximus::help() {
 	EOF
 }
 
+# @name up
+# @type internal
+# @desc Wrapper around docker compose up that provisions config files into Artifex containers.
+#
+# @usage maximus:up [channel...]
+function maximus:up() {
+	docker compose up -d "$@";
+}
+
 # @name regen
 # @type internal
-# @desc Regenerate ~/.maximus/docker-compose.yml from scribe.yml + all .conf/.mounts files.
+# @desc Regenerate ~/.maximus/docker-compose.yml from scribe.env + all .conf/.mounts files.
 #
 # @usage :regen
-maximus::regen() {
+function maximus::regen() {
 	{
 		cat <<-EOF
-			include:
-			  - scribe.yml
-
 			services:
+			  scribe:
+			    image: ghcr.io/curatorium/maximus-scribe
+			    init: true
+			    env_file: [.env, scribe.env]
+			    deploy: {resources: {limits: {cpus: '1', memory: 512m, pids: 128}}}
+			    restart: unless-stopped
+			    volumes:
 		EOF
 
 		local channel;
+		for channel in "$HOME"/.maximus/*.conf; do
+			[[ -f "$channel" ]] || continue;
+
+			channel="$(basename "$channel")";
+			channel="${channel%.conf}";
+
+			# shellcheck source=/dev/null
+			source "$HOME/.maximus/$channel.conf";
+
+			cat <<-EOF
+			      - ${project}/.claude/tasks:/tasks/discord/${channel}
+			EOF
+		done
+
 		for channel in "$HOME"/.maximus/*.conf; do
 			[[ -f "$channel" ]] || continue;
 
@@ -232,23 +256,20 @@ maximus::regen() {
 			# shellcheck source=/dev/null
 			source "$HOME/.maximus/$channel.conf";
 
-			local sessions="${project//\//-}";
 			local sudoers="/etc/maximus/artifex-sudoers-${channel}";
 
 			cat <<-EOF
+
 			  ${channel}:
 			    image: ghcr.io/curatorium/maximus-artifex
 			    depends_on: [scribe]
 			    env_file: [.env, ${channel}.env]
-			    environment:
-			      CLAUDE_CODE_DISABLE_AUTO_MEMORY: 0
 			    deploy: {resources: {limits: {cpus: '2', memory: 6g, pids: 256}}}
 			    restart: always
 			    volumes:
+			      - ${project}:/app:rw
 			      - ~/.claude:/home/artifex/.claude
-			      - ~/.claude/projects/${sessions}:/home/artifex/.claude/projects/-app
-			      - ~/.maximus/tasks/discord/${channel}:/tasks
-			      - ${project}/.git:/app.git
+			      - ~/.claude.json:/home/artifex/.claude.json
 
 						$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d; s/^[[:space:]]*/      - /' "$HOME/.maximus/.mounts")
 						$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d; s/^[[:space:]]*/      - /' "$HOME/.maximus/${channel}.mounts" 2>/dev/null)
