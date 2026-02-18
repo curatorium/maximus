@@ -14,6 +14,7 @@ services:
   artifex:
     build: {context: artifex}
     image: ghcr.io/curatorium/maximus-artifex
+    init: true
     environment:
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: 0
     deploy: {replicas: 0, resources: {limits: {cpus: '2', memory: 6g, pids: 256}}}

@@ -27,6 +27,7 @@ maximus start my-channel
 3. Navigate to **OAuth2** in the left sidebar:
    - Under **Scopes**, select `bot`
    - Under **Bot Permissions**, select:
+     - View Channels
      - Send Messages
      - Send Messages in Threads
      - Read Message History
@@ -100,7 +101,9 @@ Mention the bot (or use the configured `AGENT_NAME`) in any channel that has a c
 @max write tests for the user registration endpoint
 ```
 
-Each channel maintains its own Claude session — context carries over between messages.
+Each channel maintains its own Claude session — context carries over between messages. Threads are also supported: each thread gets its own session, separate from the parent channel.
+
+Replying to a message quotes it automatically — the original message is included as context in the task sent to Claude.
 
 ## Architecture
 
@@ -112,27 +115,43 @@ One Artifex per channel (plus one global Scribe). IPC via the filesystem. No dae
 
 | Component | Role |
 |-----------|------|
-| **Scribe** | Discord bot that writes incoming messages to `/tasks/discord/{channel}/inbox/` and polls `/tasks/**/outbox/` to send replies back |
-| **Artifex** | Headless Claude Code runner (`--dangerously-skip-permissions`) that processes tasks FIFO, maintains per-channel sessions, and writes responses to the outbox. Runs as non-root inside Docker with only the mounts and env vars you give it. |
+| **Scribe** | Discord bot that writes incoming messages to `/tasks/discord/{channel}/inbox/` and polls `/tasks/**/outbox/` to send replies back. Handles quoted replies and thread routing. |
+| **Artifex** | Headless Claude Code runner (`--dangerously-skip-permissions`) that processes tasks FIFO, maintains per-channel sessions, streams intermediate responses, and recovers interrupted tasks on restart. Runs as non-root inside Docker with only the mounts and env vars you give it. Auto-compacts context when token usage exceeds 75% of the window. |
 
 ### Task Lifecycle
 
 ```
 inbox/{timestamp}.md  -->  working/{timestamp}.md  -->  done/{timestamp}.md
-                                    |
-                            outbox/{timestamp}.md  -->  sent/{timestamp}.md
+         ^                          |
+         |                  outbox/{timestamp}.md  -->  sent/{timestamp}.md
+         |
+  (on restart: working/*.md moved back to inbox/ with resume instruction)
 ```
 
 1. **Scribe** writes the message to `inbox/`
 2. **Artifex** claims it by moving to `working/`, pipes it into `claude --print`
-3. Claude's response goes to `outbox/`, the task moves to `done/`
-4. **Scribe** sends the outbox file to Discord and moves it to `sent/`
+3. Claude streams intermediate responses to `outbox/` as it works (real-time updates in Discord)
+4. Final response goes to `outbox/`, the task moves to `done/`
+5. **Scribe** sends the outbox file to Discord and moves it to `sent/`
+
+On container restart, any tasks left in `working/` are recovered back to `inbox/` with a resume instruction appended.
 
 ### File Layout
 
 ```
 ~/.maximus/
+  .env                          # Shared environment variables
+  .mounts                       # Shared volume mounts
+  scribe.env                    # Scribe secrets (DISCORD_BOT_TOKEN, AGENT_NAME, OWNER_ID)
+  <channel>.conf                # Instance project path
+  <channel>.env                 # Instance environment variables
+  <channel>.mounts              # Instance volume mounts
+  docker-compose.yml            # Generated — do not edit directly
   tasks/discord/<channel>/      # Task directories (inbox, working, outbox, done, sent)
+  tasks/discord/<channel>/<thread>/  # Thread-level task directories
+
+/etc/maximus/
+  artifex-sudoers-<channel>     # Optional — per-instance sudoers (via maximus sudoers)
 ```
 
 ## Configuration
@@ -151,6 +170,7 @@ inbox/{timestamp}.md  -->  working/{timestamp}.md  -->  done/{timestamp}.md
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | No | Anthropic API key (alternative auth method) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | No | Claude Code OAuth token (alternative auth method) |
+| `ARTIFEX_MODEL` | No | Claude model to use (default: `opus`) |
 | `ARTIFEX_PROMPT` | No | Override the default system prompt for Claude sessions |
 | `ARTIFEX_NUDGE` | No | Override the instruction prepended to each task |
 
@@ -162,7 +182,7 @@ Because I use Discord. The Scribe is ~200 lines of code — swap it for your pre
 
 **Is this secure?**
 
-Claude Code runs with `--dangerously-skip-permissions` — but inside a Docker container, as a non-root user, with only the volumes and environment variables you explicitly mount. The container *is* the sandbox. You control exactly what each Artifex instance can access.
+Claude Code runs with `--dangerously-skip-permissions` — but inside a Docker container, as a non-root user, with only the volumes and environment variables you explicitly mount. The container *is* the sandbox. You control exactly what each Artifex instance can access. See [SECURITY.md](SECURITY.md) for the full threat model and hardening checklist.
 
 **Why a file-based task queue instead of Redis/RabbitMQ/etc.?**
 

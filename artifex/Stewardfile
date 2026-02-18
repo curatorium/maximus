@@ -1,9 +1,23 @@
 # Copyright (c) 2026 Mihai Stancu (https://github.com/curatorium)
 
+bash-import() {
+	ext https://github.com/curatorium/bash-import/releases/latest/download/bash-import
+	ext https://github.com/curatorium/bash-import/releases/latest/download/bash-test
+	apt shellcheck
+}
+
 claude() {
 	apt libncurses5
 	ext https://claude.ai/install.sh
 	defer <<<"cp /root/.local/bin/claude /usr/local/bin/claude"
+}
+
+docker() {
+	key docker https://download.docker.com/linux/ubuntu/gpg
+	src docker https://download.docker.com/linux/debian $VERSION_CODENAME stable
+	apt docker-ce-cli
+	apt docker-compose-plugin
+	apt docker-buildx-plugin
 }
 
 github() {
@@ -14,12 +28,12 @@ github() {
 	apt openssh-client
 }
 
-docker() {
-	key docker https://download.docker.com/linux/ubuntu/gpg
-	src docker https://download.docker.com/linux/debian $VERSION_CODENAME stable
-	apt docker-ce-cli
-	apt docker-compose-plugin
-	apt docker-buildx-plugin
+# @see https://github.com/PeonPing/peon-ping
+peon-ping() {
+	apt python3
+	eager <<<"touch /.dockerenv"
+	ext https://raw.githubusercontent.com/PeonPing/peon-ping/main/install.sh
+	defer <<<"rm -f /.dockerenv"
 }
 
 utils() {

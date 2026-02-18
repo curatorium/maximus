@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Discord scribe that writes messages to markdown files and sends outbox files",
-  "main": "discord.js",
+  "main": "discord/index.js",
   "scripts": {
-    "start": "node discord.js",
-    "watch": "nodemon --watch . --ext js,yaml discord.js"
+    "start": "node discord/index.js",
+    "watch": "nodemon --watch . --ext js,yaml discord/index.js",
+    "history": "node discord/history.js"
   },
   "dependencies": {
     "discord.js": "^14.18.0",

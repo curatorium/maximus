@@ -69,7 +69,7 @@ class Scribe {
     this.writeTask(message);
   };
 
-  writeTask = (message) => {
+  writeTask = async (message) => {
     // Strip the AGENT_NAME or Discord mention from the message content
     let bot = process.env.AGENT_NAME;
     let content = message.content;
@@ -78,6 +78,17 @@ class Scribe {
           .replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '')
           .replace(new RegExp(bot, 'gi'), '')
           .trim();
+    }
+
+    // Include the quoted message as blockquote context
+    if (message.reference) {
+      try {
+        let ref = await message.fetchReference();
+        let quoted = ref.content.split('\n').map(l => `> ${l}`).join('\n');
+        content = `${quoted}\n\n${content}`;
+      } catch (err) {
+        console.error(`Failed to fetch referenced message:`, err.message);
+      }
     }
 
     let channelId = message.channelId;

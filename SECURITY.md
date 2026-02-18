@@ -25,8 +25,7 @@ Each Artifex instance runs as an independent Docker container with:
 - **Explicit volume mounts** — only directories the operator mounts are visible inside the container
 - **Read-only mounts where possible** — credentials, SSH keys, and GitHub config are mounted `:ro`
 - **Resource limits** — CPU, memory, and PID caps are defined in the base service (see `docker-compose.yml`)
-- **Ephemeral filesystem** — the container's root filesystem is not persisted; only named volumes survive restarts
-- **Session volumes** — Claude session state is stored in named Docker volumes, isolated per instance
+- **Init process** — containers run with `init: true` for proper signal handling and zombie process reaping
 
 ### What is NOT isolated
 
