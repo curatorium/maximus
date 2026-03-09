@@ -95,6 +95,36 @@ function maximus:mounts() {
 	docker compose up -d;
 }
 
+# @name maximus cron
+# @type subcommand
+# @desc Edit crontab for an Artifex instance. Creates the cronjob file and adds
+# @desc a mount to <channel>.mounts if not already present. Restarts services after saving.
+# @desc The file is mounted as /etc/cron.d/<channel> inside the container.
+#
+# @usage maximus cron <channel>
+#
+# @arg <channel> -- Discord channel name.
+function maximus:cron() {
+	local channel=${1?usage: maximus cron <channel>};
+	local cronfile="/etc/maximus/cron-${channel}";
+	local mounts="$HOME/.maximus/${channel}.mounts";
+
+	sudo mkdir -p /etc/maximus;
+	sudo touch "$cronfile";
+	sudo ${EDITOR:-vi} "$cronfile";
+	sudo chown root:root "$cronfile";
+	sudo chmod 644 "$cronfile";
+
+	# Ensure mount is present
+	local mount_line="${cronfile}:/etc/cron.d/${channel}:ro";
+	if ! grep -qF "$mount_line" "$mounts" 2>/dev/null; then
+		echo "$mount_line" >> "$mounts";
+	fi
+
+	maximus::regen;
+	docker compose up -d ${channel:+"$channel"};
+}
+
 # @name maximus sudoers
 # @type subcommand
 # @desc Edit sudoers for an Artifex instance. Creates /etc/maximus/ if needed.
@@ -130,7 +160,8 @@ function maximus:add() {
 
 	cat > "$HOME/.maximus/${channel}.conf" <<<"project=${project}";  # dynamic scope: from maximus:main
 
-	local sessions; sessions="${project//\//-}";
+	local resolved; resolved="$(readlink -f "$project")";
+	local sessions; sessions="$(echo "$resolved" | tr '/.' '-')";
 	mkdir -p "$HOME/.claude/projects/${sessions}";
 	mkdir -p "${project}/.claude/tasks";
 
@@ -170,6 +201,7 @@ function maximus:attach() {
 
 	stty susp undef 2>/dev/null;
 	docker exec -it --detach-keys="ctrl-z" "${container}" entrypoint attach "$@";
+	docker exec "${container}" pkill -f "^claude" 2>/dev/null || true;
 	stty susp '^Z' 2>/dev/null;
 }
 
@@ -186,6 +218,7 @@ function maximus::help() {
 	  maximus start   [channel]    Start all services or a specific channel
 	  maximus env     [channel]    Edit shared .env or instance-specific <channel>.env (restarts)
 	  maximus mounts  [channel]    Edit shared or instance volume mounts (restarts)
+	  maximus cron    <channel>    Edit crontab for an instance (restarts)
 	  maximus sudoers <channel>    Edit sudoers for an instance via visudo (restarts)
 	  maximus attach  <channel>    Exec into the container and resume a Claude session
 
@@ -241,7 +274,9 @@ function maximus::regen() {
 			source "$HOME/.maximus/$channel.conf";
 
 			local sudoers="/etc/maximus/artifex-sudoers-${channel}";
-			local sessions; sessions="$HOME/.claude/projects/$(echo "$project" | tr '/' '-')";
+			local resolved; resolved="$(readlink -f "$project")";
+			local sessions; sessions="$HOME/.claude/projects/$(echo "$resolved" | tr '/.' '-')";
+			mkdir -p "$sessions";
 
 			cat <<-EOF
 

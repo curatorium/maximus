@@ -21,6 +21,12 @@ function artifex:main() {
 
 	mkdir -p /app/.claude/tasks/{inbox,working,outbox,done};
 
+	# Start cron if any custom cron.d jobs exist
+	if compgen -G '/etc/cron.d/*' | grep -qv e2scrub_all 2>/dev/null; then
+		sudo /usr/sbin/cron;
+		echo "~~~ Cron started";
+	fi
+
 	artifex::recover;
 
 	while true; do

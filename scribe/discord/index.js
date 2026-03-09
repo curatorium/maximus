@@ -187,9 +187,15 @@ class Scribe {
       .filter(channel => channel.type === ChannelType.GuildText)
       .forEach(channel => {
         let name = channel.name.replace(/[^-_a-zA-Z0-9]/g, '');
+        let dir = `${base}/${name}`;
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+        } catch (err) {
+          if (err.code !== 'EACCES') throw err;
+          if (!fs.existsSync(dir)) return; // no mount for this channel, skip
+        }
         this.channels.set(channel.id, name);
         this.channelIds.set(name, channel.id);
-        fs.mkdirSync(`${base}/${name}`, { recursive: true });
       });
 
   };

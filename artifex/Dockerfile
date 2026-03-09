@@ -20,5 +20,6 @@ COPY entrypoint /usr/local/bin/entrypoint
 # Prepare non-root user
 RUN useradd -m -s /bin/bash -u 1000 artifex
 RUN mkdir -p /app /home/artifex/.ssh /home/artifex/.config /home/artifex/.local && chown -R artifex:artifex /app /home/artifex/.ssh /home/artifex/.config /home/artifex/.local
+RUN echo 'artifex ALL=(root) NOPASSWD: /usr/sbin/cron' > /etc/sudoers.d/artifex-cron
 USER artifex
 WORKDIR /app
