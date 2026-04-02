@@ -19,19 +19,18 @@ function artifex:main() {
 		return;
 	fi
 
-	mkdir -p /app/.claude/tasks/{inbox,working,outbox,done};
+	mkdir -p .claude/tasks/{inbox,working,outbox,done};
 
-	# Start cron if any custom cron.d jobs exist
+	# Start cron if any custom cron.d jobs exist (skip if already running on host)
 	if compgen -G '/etc/cron.d/*' | grep -qv e2scrub_all 2>/dev/null; then
-		sudo /usr/sbin/cron;
-		echo "~~~ Cron started";
+		sudo /usr/sbin/cron 2>/dev/null && echo "~~~ Cron started" || true;
 	fi
 
 	artifex::recover;
 
 	while true; do
 		# Find oldest task -- process FIFO
-		local task; task=$(find /app/.claude/tasks -path '*/inbox/*.md' -type f | sort | head -n 1);
+		local task; task=$(find .claude/tasks -path '*/inbox/*.md' -type f | sort | head -n 1);
 
 		# No tasks -- waiting
 		[[ -z "$task" ]] && sleep 0.1s && continue;
@@ -69,7 +68,7 @@ function artifex::recover() {
 		MD
 		mv "$task" "$base/inbox/";
 		echo "~~~ Recovered interrupted task: $name";
-	done < <(find /app/.claude/tasks -path '*/working/*.md' -type f 2>/dev/null)
+	done < <(find .claude/tasks -path '*/working/*.md' -type f 2>/dev/null)
 }
 
 # @name artifex::task
@@ -136,7 +135,7 @@ function artifex::run() {
 		You are running inside a Docker container, receiving tasks asynchronously via Discord.
 
 		# Environment
-		- /app — the project root (mounted from host).
+		- CWD is the project root (/app in Docker, or WorkingDirectory= via systemd).
 
 		# Communication
 		Your exchange is asynchronous — mediated by a Discord bot. Each round-trip is a separate task. You CAN ask clarifying questions but batch them — be specific about what you need to proceed.
@@ -212,6 +211,7 @@ function artifex::compact() {
 function artifex::stream() {
 	local reply="$1";
 	local last="";
+	local tmp="${reply}.tmp";
 	while IFS= read -r line; do
 		[[ -z "$line" ]] && continue;
 		last="$line";
@@ -221,8 +221,11 @@ function artifex::stream() {
 		fi
 
 		local text; text=$(jq -r '[.message.content[] | select(.type == "text") | .text] | join("\n")' <<<"$line" 2>/dev/null);
-		[[ -n "$text" ]] && echo "$text" >> "$reply";
+		[[ -n "$text" ]] && echo "$text" >> "$tmp";
 	done
+
+	# Atomically move to outbox — Scribe only sees the complete reply
+	[[ -f "$tmp" ]] && mv "$tmp" "$reply";
 
 	# Final line is the JSON summary — goes to stdout (captured in $out)
 	echo "$last";

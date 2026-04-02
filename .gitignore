@@ -5,3 +5,4 @@ node_modules/
 .env
 sudoers-*
 *.log
+CLAUDE.md
