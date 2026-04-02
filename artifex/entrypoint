@@ -44,9 +44,10 @@ function artifex:main() {
 #
 # @desc Allows Artifex users to attach & continue a claude conversation session.
 function artifex:attach() {
-	local continue=; compgen -G ~/.claude/projects/-app/*.jsonl > /dev/null 2>&1 && continue="--continue";
+	local project_key; project_key=$(pwd | tr '/' '-');
+	local resume=; compgen -G ~/.claude/projects/${project_key}/*.jsonl > /dev/null 2>&1 && resume="--continue";
 
-	claude ${continue:+$continue} --dangerously-skip-permissions "$@";
+	claude ${resume:+$resume} --dangerously-skip-permissions "$@";
 }
 
 # @name artifex::recover
@@ -152,10 +153,11 @@ function artifex::run() {
 	local nudge="After completing this task, write a summary of what you did and what you found.";
 	ARTIFEX_NUDGE="${ARTIFEX_NUDGE:-$nudge}";
 
-	local continue=""; compgen -G ~/.claude/projects/-app/*.jsonl > /dev/null 2>&1 && continue="--continue";
+	local project_key; project_key=$(pwd | tr '/' '-');
+	local resume=""; compgen -G ~/.claude/projects/${project_key}/*.jsonl > /dev/null 2>&1 && resume="--continue";
 
 	local args=(
-		${continue:+$continue}
+		${resume:+$resume}
 		--model "${ARTIFEX_MODEL:-opus}"
 		--print --verbose --output-format stream-json
 		--dangerously-skip-permissions
