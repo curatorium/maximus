@@ -150,7 +150,7 @@ function artifex::run() {
 	';
 	ARTIFEX_PROMPT="${ARTIFEX_PROMPT:-$prompt}";
 
-	local nudge="After completing this task, write a summary of what you did and what you found.";
+	local nudge="Reply ONLY about this message. Include relevant details about what you did in tool calls this turn as the user does not see them. Do not summarize prior exchanges.";
 	ARTIFEX_NUDGE="${ARTIFEX_NUDGE:-$nudge}";
 
 	local project_key; project_key=$(pwd | tr '/' '-');
