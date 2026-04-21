@@ -19,9 +19,11 @@ function maximus:main() {
 
 	cd "$HOME/.maximus" 2>/dev/null || true;
 
-	declare -F "maximus:$cmd" > /dev/null &&
-		"maximus:$cmd" "$@" ||
+	if declare -F "maximus:$cmd" > /dev/null; then
+		"maximus:$cmd" "$@";
+	else
 		docker compose "$cmd" "$@";
+	fi
 
 	cd - > /dev/null;
 }
