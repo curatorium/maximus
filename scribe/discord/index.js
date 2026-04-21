@@ -120,6 +120,9 @@ class Scribe {
           continue;
         }
         let { channel, thread, message } = match.groups;
+        if (!this.channelIds.get(channel)) {
+          continue; // Orphan channel (no Discord mapping) — leave the outbox for another consumer.
+        }
         try {
           await this.writeReply(channel, thread, message);
         } catch (err) {
