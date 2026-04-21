@@ -132,23 +132,7 @@ function artifex::run() {
 
 	local taskdir; taskdir="$(dirname "$(dirname "$input")")";
 
-	local prompt='
-		You are running inside a Docker container, receiving tasks asynchronously via Discord.
-
-		# Environment
-		- CWD is the project root (/app in Docker, or WorkingDirectory= via systemd).
-
-		# Communication
-		Your exchange is asynchronous — mediated by a Discord bot. Each round-trip is a separate task. You CAN ask clarifying questions but batch them — be specific about what you need to proceed.
-		The user cannot see your tool calls, file reads, or intermediate output. Your final text response is the ONLY thing relayed. Be concrete: what you found, what you changed (file paths, summaries), what you could not do and why.
-
-		# Formatting (Discord)
-		Messages are chunked at 2000 chars, splitting on \n---\n.
-		- Use \n---\n between logical sections for clean chunk boundaries.
-		- No markdown tables — use fenced code blocks with aligned columns instead.
-		- No HTML tags.
-	';
-	ARTIFEX_PROMPT="${ARTIFEX_PROMPT:-$prompt}";
+	local prompt; prompt="$(cat /etc/artifex/prompt.md)";
 
 	local nudge="Reply ONLY about this message. Include relevant details about what you did in tool calls this turn as the user does not see them. Do not summarize prior exchanges.";
 	ARTIFEX_NUDGE="${ARTIFEX_NUDGE:-$nudge}";
@@ -161,7 +145,7 @@ function artifex::run() {
 		--model "${ARTIFEX_MODEL:-opus}"
 		--print --verbose --output-format stream-json
 		--dangerously-skip-permissions
-		--append-system-prompt "$ARTIFEX_PROMPT"
+		--append-system-prompt "$prompt"
 	);
 
 	# Run Claude Code with task in STDIN, prefixed with result instruction

@@ -7,9 +7,9 @@
 #
 
 maximus:completions() {
-  local subcommands="install env mounts sudoers add start attach help";
+  local subcommands="install env mounts prompt sudoers add start attach help";
   local compose_subs="up down ps logs pull push restart stop start build exec run config";
-  local channel_subs="env mounts sudoers add start attach";
+  local channel_subs="env mounts prompt sudoers add start attach";
 
   local cur="${COMP_WORDS[COMP_CWORD]}";
   local cmd="${COMP_WORDS[1]:-}";

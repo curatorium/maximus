@@ -43,6 +43,7 @@ maximus add     <channel>    Create a new Artifex config for a Discord channel
 maximus start   [channel]    Start all services or a specific channel
 maximus env     [channel]    Edit shared .env or instance-specific <channel>.env (restarts)
 maximus mounts  [channel]    Edit shared or instance volume mounts (restarts)
+maximus prompt  <channel>    Edit the system prompt file for an instance (restarts)
 maximus sudoers <channel>    Edit sudoers for an instance via visudo (restarts)
 maximus attach  <channel>    Exec into the container and resume the last Claude session
 
@@ -77,6 +78,14 @@ maximus mounts my-channel   # instance-specific volume mounts
 ```
 
 Mounts are one per line in Docker volume format (e.g. `~/src:/app:ro`).
+
+### System Prompt
+
+```bash
+maximus prompt my-channel
+```
+
+Edits `~/.maximus/<channel>.prompt`, which is bind-mounted into the container at `/etc/artifex/prompt.md`. Overrides the default prompt baked into the image. If the file is absent, Artifex uses the baked-in default.
 
 ### Privileged Access (sudoers)
 
@@ -171,7 +180,6 @@ On container restart, any tasks left in `working/` are recovered back to `inbox/
 | `ANTHROPIC_API_KEY` | No | Anthropic API key (alternative auth method) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | No | Claude Code OAuth token (alternative auth method) |
 | `ARTIFEX_MODEL` | No | Claude model to use (default: `opus`) |
-| `ARTIFEX_PROMPT` | No | Override the default system prompt for Claude sessions |
 | `ARTIFEX_NUDGE` | No | Override the instruction prepended to each task |
 
 ## FAQ

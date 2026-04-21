@@ -76,6 +76,27 @@ function maximus:env() {
 	docker compose up -d;
 }
 
+# @name maximus prompt
+# @type subcommand
+# @desc Edit the system prompt file for an Artifex instance. Creates the file
+# @desc if missing. Mounted into the container at /etc/artifex/prompt.md
+# @desc and used in place of the hardcoded default. Restarts the channel after saving.
+#
+# @usage maximus prompt <channel>
+#
+# @arg <channel> -- Discord channel name.
+function maximus:prompt() {
+	local channel=${1?usage: maximus prompt <channel>};
+	local file="$HOME/.maximus/${channel}.prompt";
+
+	[[ ! -f "$HOME/.maximus/${channel}.conf" ]] && echo "No such channel: ${channel}" >&2 && return 1;
+
+	touch "$file";
+	${EDITOR:-vi} "$file";
+	maximus::regen;
+	docker compose up -d "${channel}";
+}
+
 # @name maximus mounts
 # @type subcommand
 # @desc Edit volume mounts. Without a channel, edits the shared .mounts.
@@ -220,6 +241,7 @@ function maximus::help() {
 	  maximus start   [channel]    Start all services or a specific channel
 	  maximus env     [channel]    Edit shared .env or instance-specific <channel>.env (restarts)
 	  maximus mounts  [channel]    Edit shared or instance volume mounts (restarts)
+	  maximus prompt  <channel>    Edit the system prompt file for an instance (restarts)
 	  maximus cron    <channel>    Edit crontab for an instance (restarts)
 	  maximus sudoers <channel>    Edit sudoers for an instance via visudo (restarts)
 	  maximus attach  <channel>    Exec into the container and resume a Claude session
@@ -276,6 +298,7 @@ function maximus::regen() {
 			source "$HOME/.maximus/$channel.conf";
 
 			local sudoers="/etc/maximus/artifex-sudoers-${channel}";
+			local prompt="$HOME/.maximus/${channel}.prompt";
 			local resolved; resolved="$(readlink -f "$project")";
 			local sessions; sessions="$HOME/.claude/projects/$(echo "$resolved" | tr '/.' '-')";
 			mkdir -p "$sessions";
@@ -299,6 +322,7 @@ function maximus::regen() {
 						$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d; s/^[[:space:]]*/      - /' "$HOME/.maximus/${channel}.mounts" 2>/dev/null)
 
 			      $([[ -f "$sudoers" ]] && echo "- ${sudoers}:/etc/sudoers.d/artifex:ro")
+			      $([[ -f "$prompt"  ]] && echo "- ${prompt}:/etc/artifex/prompt.md:ro")
 			EOF
 		done
 	} > "$HOME/.maximus/docker-compose.yml";

@@ -16,6 +16,7 @@ COPY Stewardfile /tmp/Stewardfile
 RUN cd /tmp && steward
 
 COPY entrypoint /usr/local/bin/entrypoint
+COPY prompt.md /etc/artifex/prompt.md
 
 # Prepare non-root user
 RUN useradd -m -s /bin/bash -u 1000 artifex
