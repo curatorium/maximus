@@ -45,6 +45,7 @@ maximus env     [channel]    Edit shared .env or instance-specific <channel>.env
 maximus mounts  [channel]    Edit shared or instance volume mounts (restarts)
 maximus prompt  <channel>    Edit the system prompt file for an instance (restarts)
 maximus sudoers <channel>    Edit sudoers for an instance via visudo (restarts)
+maximus send    <channel>    Send a task from stdin; block until reply, print to stdout
 maximus attach  <channel>    Exec into the container and resume the last Claude session
 
 maximus up      [channel]    Create and start container(s)

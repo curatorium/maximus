@@ -207,6 +207,38 @@ function maximus:start() {
 	docker compose up -d ${channel:+"$channel"};
 }
 
+# @name maximus send
+# @type subcommand
+# @desc Send a task to a channel from stdin. Blocks until the task is done,
+# @desc then prints the reply to stdout. Useful for driving a builder from
+# @desc another Claude Code session instead of Discord.
+#
+# @usage echo "do the thing" | maximus send <channel>
+#
+# @arg <channel> -- Discord channel name (= instance identifier).
+function maximus:send() {
+	local channel=${1?usage: maximus send <channel>};
+	local conf="$HOME/.maximus/${channel}.conf";
+
+	[[ ! -f "$conf" ]] && echo "No such channel: ${channel}" >&2 && return 1;
+
+	local project;
+	# shellcheck source=/dev/null
+	source "$conf";
+
+	local id; id="$(date -u +%Y%m%d%H%M%S%3N).cli-$$";
+	local tasks="${project}/.claude/tasks";
+
+	mkdir -p "${tasks}/inbox";
+	cat > "${tasks}/inbox/${id}.md";
+
+	while [[ ! -f "${tasks}/done/${id}.md" ]]; do
+		sleep 1;
+	done
+
+	cat "${tasks}/outbox/${id}.md";
+}
+
 # @name maximus attach
 # @type subcommand
 # @desc Exec into a running Artifex container and resume the last Claude session.
@@ -244,6 +276,7 @@ function maximus::help() {
 	  maximus prompt  <channel>    Edit the system prompt file for an instance (restarts)
 	  maximus cron    <channel>    Edit crontab for an instance (restarts)
 	  maximus sudoers <channel>    Edit sudoers for an instance via visudo (restarts)
+	  maximus send    <channel>    Send a task from stdin; block until reply, print to stdout
 	  maximus attach  <channel>    Exec into the container and resume a Claude session
 
 	  # Aliases for docker compose (in maximus context):
