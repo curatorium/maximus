@@ -1,0 +1,5 @@
+{
+  "name": "maximus",
+  "version": "1.0.0-alpha.3",
+  "description": "Delegate tasks to maximus artifexes (containerized headless Claude Code runners). Ships a delegate skill that teaches the coordinator how to dispatch work, background the send, poll on a recurring schedule, optionally spawn a fresh artifex or worktree-isolated one, and surface replies when artifexes finish."
+}

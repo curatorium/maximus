@@ -1,0 +1,18 @@
+{
+  "name": "curatorium-maximus",
+  "owner": {
+    "name": "curatorium"
+  },
+  "metadata": {
+    "description": "Containerized Claude Code sandbox with coordinator delegation",
+    "version": "1.0.0-alpha.3"
+  },
+  "plugins": [
+    {
+      "name": "maximus",
+      "description": "Delegate tasks to maximus artifexes (containerized headless Claude Code runners). Ships a delegate skill that teaches the coordinator how to dispatch work, background the send, poll on a recurring schedule, optionally spawn a fresh artifex or worktree-isolated one, and surface replies when artifexes finish.",
+      "version": "1.0.0-alpha.3",
+      "source": "./"
+    }
+  ]
+}
